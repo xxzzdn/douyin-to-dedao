@@ -9,6 +9,7 @@
 - 使用 launch_persistent_context 持久化登录态，第二次起免登录
 - 智能等待：轮询检测登录态，已登录立即继续，未登录最多等 30 秒
 - 兼容 Python 3.13 + Playwright 1.64
+- 修复：抖音登录检测改用 context.cookies() 读取 HttpOnly cookie
 """
 
 import json
@@ -76,16 +77,18 @@ def extract_sec_uid(url):
 
 
 async def wait_for_douyin_login(page, progress_window=None):
-    """轮询检测抖音登录态，检测到立即继续，最多等 LOGIN_TIMEOUT 秒。"""
-    check_js = "() => document.cookie.includes('sessionid')"
+    """轮询检测抖音登录态：通过 context.cookies() 读取 HttpOnly cookie，检测到立即继续。"""
+    # 抖音的 sessionid 是 HttpOnly cookie，document.cookie 读不到，必须用 context.cookies()
+    LOGIN_COOKIE_NAMES = {'sessionid', 'sessionid_ss', 'sid_tt', 'uid_tt'}
     elapsed = 0
     while elapsed < LOGIN_TIMEOUT:
         try:
-            logged_in = await page.evaluate(check_js)
-            if logged_in:
-                if progress_window:
-                    progress_window.update_status("抖音已登录，开始提取作品...")
-                return True
+            cookies = await page.context.cookies()
+            for cookie in cookies:
+                if cookie['name'] in LOGIN_COOKIE_NAMES and cookie.get('value'):
+                    if progress_window:
+                        progress_window.update_status("抖音已登录，开始提取作品...")
+                    return True
         except Exception:
             pass
         if progress_window:
